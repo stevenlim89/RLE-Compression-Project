@@ -57,82 +57,72 @@ output	done; // done is a signal to indicate that encryption of the frame is com
 
 assign port_A_clk = clk;	//Clarified in the Piazza post
 
-reg [31:0] port_A_data_in;
-reg [31:0] port_A_addr;
-reg [31:0] rle_size;
+reg [7:0] byte;		//Tracks the bytes reading in
+reg [31:0] data_in;	//Copies the data from "port_A_data_out"
+reg [2:0] STATE;		//Tracks the state we are in
+reg [31:0] write_address;	//Copies "rle_adder" write address
+reg [31:0] read_address;	//Copies "message_addr" read address
 
-reg [7:0] two_char_value;		//Each character is 8 bits = 1 byte = 2 hexadecimal
-reg [3:0] char_value = 4'd0;
-reg [31:0] num_of_chars; 	//Counter for number character being counted
-reg [31:0] addr_tracker;	//Tracks the address to be read from
+parameter IDLE = 3'b000, READ = 3'b001, WRITE = 3'b010, CALCULATE = 3'b011;	//States
 
+assign read_address = message_addr;
+assign write_address = rle_adder;
 
-always @ (*)		//Work on the computation outside of the clock cycle
-begin
-	//Start at the starting address of the file: "message_addr"
-	assign addr_tracker = message_addr;
-	
-	//Specify the address of dpsram being read from to "port_A_addr"
-	assign port_A_addr = addr_tracker;
-	
-	//Signify we are reading the value with output "port_A_we == 0"
-	assign port_A_we = 1;
-	//Save the char_value of the first character in hexidecimal, "port_A_data_out"
-		//"port_A_data_out" is 32 bits long, have to read in each 4 bits at a time
-		//since each data in the text file is a hexidecimal representation
-	for(i = 0; i < 32; i = i + 4)
-	begin
-		if(char_value == port_A_data_out[i+4:i])
-		begin
-			//Count and compare the first character with the second character
-			//Loop through this and count the number of times they are the same
-			char_value <= port_A_data_out[i+4:i];
-			num_of_chars = num_of_chars + 1;
-		end
-		
-		//Once the next value is different, output the num_of_chars and the char_value
-		//into the starting address of the writing frame "rle_addr" (remember little endian)
-		//When you output, output the results into "port_A_data_in"
-			//and specify which address it is being written to in "port_A_addr"
-		//When outputting, output "post_A_we == 1"
-		else
-		begin
-			
-		end
-	end
-	
-	
-	
-	//Once the next value is different, output the num_of_chars and the char_value into the
-	//starting address of the writing frame "rle_addr" (remember little endian)
-		//When you output, output the results into "port_A_data_in"
-			//and specify which address it is being written to in "port_A_addr"
-		//When outputting, output "post_A_we == 1"
-	
-	//Save the next char_value and start the iteration again
-	
-	//Check that the length of the "message_size" is on par with
-	//our compressed size "rle_size"
-		//If so, output "rle_size" and signal "done == 1"
-		//Reset all counting factors to be zero
-end
-
-always @ (posedge clk)
+always @ (posedge clk or negedge nreset)
 begin
 	if(!nreset)
 	begin
-		//Want to reset all counting factors to "0"
-		char_value <= 0;
-		num_of_chars <= 0;
+		STATE <= IDLE;
+		byte <= 8'd0;
+		data_in <= 32'd0;
+	end
+
+	
+	else
+	begin
+		case(STATE)
+		begin
+			IDLE:	begin
+					if(start)
+						begin
+						port_A_we = 1'b0;
+						STATE <= READ;
+						end
+					else
+						STATE <= IDLE;
+					end
+			
+			READ:	begin
+					if(!port_A_we)
+						begin
+						data_in <= port_A_data_out;	//Copies the input data
+						read_address <= read_address + 4;		//Update the read address to the
+																			//next byte
+						STATE <= CALCULATE;
+						end
+					else
+						STATE <= IDLE;		//Maybe change to state WRITE???
+					end
+			
+			WRITE:	begin
+						if(port_A_we)
+							begin
+							write_address <= write_address + 4;	//Update the write address to the
+																			//next byte
+							port_A_we <= 1'b0;
+							end								
+						else
+							STATE <= IDLE;
+						end
+			
+			CALCULATE:	begin
+							port_A_we <= 1'b1;
+							STATE <= WRITE;	//When finished calculating, write the data
+							end
+		
+		endcase
 	end
 	
-	else if (start)
-	begin
-		//want to do the computation
-	end
-
 end
 
-
-
-//wait until start == 1 before you start the computation
+endmodule
