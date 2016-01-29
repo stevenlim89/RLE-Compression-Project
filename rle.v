@@ -57,71 +57,73 @@ output	done; // done is a signal to indicate that encryption of the frame is com
 
 assign port_A_clk = clk;	//Clarified in the Piazza post
 
-reg [7:0] byte;		//Tracks the bytes reading in
+
+reg done;
+reg port_A_we;
+reg [15:0] port_A_addr;
+reg [31:0] port_A_data_in;
+reg [31:0] rle_size;
+
+
+reg [31:0] byte;		//Tracks the bytes reading in
 reg [31:0] data_in;	//Copies the data from "port_A_data_out"
 reg [2:0] STATE;		//Tracks the state we are in
 reg [31:0] write_address;	//Copies "rle_adder" write address
+reg [31:0] write_address_var;
 reg [31:0] read_address;	//Copies "message_addr" read address
+reg [31:0] read_address_var;
 
-parameter IDLE = 3'b000, READ = 3'b001, WRITE = 3'b010, CALCULATE = 3'b011;	//States
+parameter IDLE = 3'b000; //READ = 3'b001, WRITE = 3'b010, CALCULATE = 3'b011;	//States
+parameter CALCULATE = 3'b001, FINISH = 3'b010;
 
-assign read_address = message_addr;
-assign write_address = rle_adder;
+//assign read_address = message_addr;
+//assign write_address = rle_adder;
 
 always @ (posedge clk or negedge nreset)
 begin
 	if(!nreset)
 	begin
 		STATE <= IDLE;
-		byte <= 8'd0;
+		byte <= 32'd0;
 		data_in <= 32'd0;
+		done <= 1'b0;
 	end
-
 	
 	else
-	begin
 		case(STATE)
-		begin
-			IDLE:	begin
+			IDLE:
 					if(start)
 						begin
-						port_A_we = 1'b0;
-						STATE <= READ;
-						end
-					else
-						STATE <= IDLE;
-					end
-			
-			READ:	begin
-					if(!port_A_we)
-						begin
-						data_in <= port_A_data_out;	//Copies the input data
-						read_address <= read_address + 4;		//Update the read address to the
-																			//next byte
+						port_A_we <= 1'b0;
+						data_in <= port_A_data_out;
+						$display ("port_A_data_out: %h", port_A_data_out);
+						read_address_var <= message_addr;
+						$display ("read_address_var: %h", read_address_var);
+						write_address_var <= rle_addr;
 						STATE <= CALCULATE;
-						end
-					else
-						STATE <= IDLE;		//Maybe change to state WRITE???
-					end
-			
-			WRITE:	begin
-						if(port_A_we)
-							begin
-							write_address <= write_address + 4;	//Update the write address to the
-																			//next byte
-							port_A_we <= 1'b0;
-							end								
-						else
-							STATE <= IDLE;
+						//STATE <= READ;
 						end
 			
 			CALCULATE:	begin
-							port_A_we <= 1'b1;
-							STATE <= WRITE;	//When finished calculating, write the data
-							end
+						$display ("INSIDE CALCULATE NOW");
+						$display ("read_address_var: %h", read_address_var);
+						$display ("port_A_data_out: %h", port_A_data_out);
+						byte <= port_A_data_out;
+						$display ("byte: %h", byte);
+						port_A_we <= 1'b1;
+						//STATE <= WRITE;	//When finished calculating, write the data
+						
+						port_A_addr <= read_address_var;
+						read_address_var <= read_address_var + 4;
+						STATE <= CALCULATE;
+							
+							
+						//STATE <= FINISH;
+						end
+							
+			FINISH: STATE <= IDLE;
 		
 		endcase
-	end
 	
 end
 
