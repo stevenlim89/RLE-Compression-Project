@@ -66,7 +66,7 @@ reg [31:0] rle_size;
 
 
 reg [7:0] byte;			//Tracks the bytes reading in
-reg [31:0] data_in;	//Copies the data from "port_A_data_out"
+wire [31:0] data_in;	//Copies the data from "port_A_data_out"
 reg [2:0] STATE;		//Tracks the state we are in
 //reg [31:0] write_address;	//Copies "rle_adder" write address
 reg [31:0] write_address_var;
@@ -74,17 +74,22 @@ reg [31:0] write_address_var;
 reg [31:0] read_address_var;
 reg [31:0] byte_count = 32'd0;		//Counts the number of same bytes read in
 reg lsb_half = 1'b1;
+reg tempReg = 1'b1;
 reg [2:0] shift_count = 3'd0;
 
 wire [31:0] rd_addr;
 
+reg [31:0] newData;
+
+
+assign data_in = port_A_data_out;
 //assign rd_addr = read_address_var + 4;
 
 //assign port_A_we = 
 
 parameter IDLE = 3'b000; //READ = 3'b001, WRITE = 3'b010, CALCULATE = 3'b011;	//States
 parameter CALCULATE = 3'b001, FINISH = 3'b010;
-parameter TEMP = 3'b100;
+parameter PRECALC = 3'b100;
 
 
 always @ (posedge clk or negedge nreset)
@@ -92,8 +97,8 @@ begin
 	if(!nreset)
 	begin
 		STATE <= IDLE;
-		byte <= 32'd0;
-		data_in <= 32'd0;
+		byte <= 8'd0;
+		//newData <= 32'd0;
 		done <= 1'b0;
 	end
 	
@@ -103,15 +108,25 @@ begin
 					if(start)
 						begin
 						port_A_we <= 1'b0;
-						data_in <= port_A_data_out;
-						$display ("port_A_data_out: %h", port_A_data_out);
 						read_address_var <= message_addr;
 						port_A_addr <= message_addr;
-						$display ("read_address_var: %h", read_address_var);
 						write_address_var <= rle_addr;
-						STATE <= CALCULATE;
+						newData <= data_in;
+						STATE <= PRECALC;
 						end
-			
+			PRECALC: begin
+				 if(newData != data_in)
+					begin
+					newData <= data_in;
+					$display ("This is newData: %h", newData);
+					STATE <= PRECALC;
+					end
+				 else 
+				 begin
+				 	STATE <= CALCULATE;
+				 end
+				 end
+
 			CALCULATE:	begin
 						
 						if(!port_A_we)
@@ -119,32 +134,34 @@ begin
 						
 						$display ("INSIDE CALCULATE NOW");
 						$display ("data_in: %h", data_in);
-						data_in <= port_A_data_out;
+						//data_in <= port_A_data_out;
 							if(shift_count == 4)
 							begin	
 							$display ("Entered IF");
 							//read_address_var <= rd_addr;
 							port_A_addr <= read_address_var + 4;
-							$display ("read_address_var: ", read_address_var);
-							$display ("rd_addr: ", rd_addr);
-							$display ("port_A_addr: ", port_A_addr);
 							shift_count <= 0;
+							port_A_we <= 1'b1;
 							end
 
 							else if(byte_count == 0)
 							begin
-							byte <= data_in[7:0]; 		//Saves the initial data
+							byte <= newData[7:0]; 		//Saves the initial data
 							$display ("Entered ELSE IF ONE");
-							data_in <= data_in >> 8;
+							//data_in <= data_in >> 8;
+							$display ("newData: %h", newData);
+							$display ("byte: %h", byte);
+							newData <= newData >> 8;
 							shift_count <= shift_count + 1;
 							byte_count <= byte_count + 1;
 							end
 
 
-							else if(byte == data_in[7:0])
+							else if(byte == newData[7:0])
 							begin
 							$display ("Entered ELSE IF TWO");
-							data_in <= data_in >> 8;
+							//data_in <= data_in >> 8;
+							newData <= newData >> 8;
 							shift_count <= shift_count + 1;
 							byte_count <= byte_count + 1;
 							end
@@ -153,8 +170,8 @@ begin
 							begin
 							$display ("Entered ELSE");
 							port_A_we <= 1'b1;
-
-							$display ("data_in: %h", data_in);
+							//byte <= newData[7:0];
+							$display ("newData: %h", newData);
 							$display ("byte: %h", byte);
 							end
 $display ("\n");
@@ -187,13 +204,13 @@ $display ("\n");
 							byte_count <= 0;
 							//port_A_addr <= read_address_var;
 						end
-						STATE <= TEMP;
+						STATE <= CALCULATE;
 					end
 							
-			TEMP:	begin
+			/*TEMP:	begin
 				port_A_addr <= read_address_var;
 				STATE <= CALCULATE;
-				end
+				end*/
 			FINISH: STATE <= IDLE;
 		
 		endcase
