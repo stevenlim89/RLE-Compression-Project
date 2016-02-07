@@ -52,167 +52,170 @@ output	[31:0] rle_size;
 
 output	done; // done is a signal to indicate that encryption of the frame is complete
 
+// State Machine  
+parameter IDLE = 3'b000, CALCULATE = 3'b001, PRECALC = 3'b010;
 
+reg [7:0] byte;			// Tracks the bytes reading in
+reg [7:0] similar_byte_count;  	// Counts the number of same bytes read in
+reg [2:0] STATE;		// Tracks the state we are in
+reg [31:0] write_address_var;  	// Register to store write adress
+reg [31:0] read_address_var;	// Register to store read address
+reg [31:0] write_buff, newData; // Registers to store what needs to be written and read in
+reg [31:0] rle_counter;
+reg [31:0] byte_written;
+reg lsb_half;			// Write to the first half of the write buffer
+reg write, read;		// Flags to keep track if we should read or write now
+reg doneFlag;
 
+integer shift_count;		// Counter to keep track of how many bits have been shifted
 
+wire [31:0] read_count;		// Wire that holds the updated values of the new read address 
+wire [31:0] write_count;	// Wire that holds the updated values of the new write address
+
+assign read_count = read_address_var + 4;
+assign write_count = write_address_var + 4;
+
+// Need to assign module outputs. They should be wires.
 assign port_A_clk = clk;	//Clarified in the Piazza post
+assign port_A_addr = (write) ? write_address_var : read_address_var;
+assign port_A_we = write;
+assign port_A_data_in = write_buff;
 
-
-reg done;
-reg port_A_we;
-reg [15:0] port_A_addr;
-reg [31:0] port_A_data_in;
-reg [31:0] rle_size;
-
-
-reg [7:0] byte;			//Tracks the bytes reading in
-wire [31:0] data_in;	//Copies the data from "port_A_data_out"
-reg [2:0] STATE;		//Tracks the state we are in
-//reg [31:0] write_address;	//Copies "rle_adder" write address
-reg [31:0] write_address_var;
-//reg [31:0] read_address;	//Copies "message_addr" read address
-reg [31:0] read_address_var;
-reg [31:0] byte_count = 32'd0;		//Counts the number of same bytes read in
-reg lsb_half = 1'b1;
-reg tempReg = 1'b1;
-reg [2:0] shift_count = 3'd0;
-
-wire [31:0] rd_addr;
-
-reg [31:0] newData;
-
-
-assign data_in = port_A_data_out;
-//assign rd_addr = read_address_var + 4;
-
-//assign port_A_we = 
-
-parameter IDLE = 3'b000; //READ = 3'b001, WRITE = 3'b010, CALCULATE = 3'b011;	//States
-parameter CALCULATE = 3'b001, FINISH = 3'b010;
-parameter PRECALC = 3'b100;
-
+// Do later
+assign rle_size = byte_written;
+assign done = doneFlag;
 
 always @ (posedge clk or negedge nreset)
 begin
 	if(!nreset)
 	begin
 		STATE <= IDLE;
-		byte <= 8'd0;
-		//newData <= 32'd0;
-		done <= 1'b0;
+		byte <= 8'b0;
+		shift_count <= 0;
+		similar_byte_count <= 8'b0;
+		write <= 1'b0;
+		write_address_var <= 32'b0;
+		read_address_var <= 32'b0;
+		byte_written <= 32'b0;
+		rle_counter <= 32'b0;
+		write_buff <= 32'b0;
+		lsb_half <= 1'b1;
+		read <= 1'b0;
+		doneFlag <= 1'b0;
 	end
 	
 	else
 		case(STATE)
 			IDLE:
-					if(start)
-						begin
-						port_A_we <= 1'b0;
-						read_address_var <= message_addr;
-						port_A_addr <= message_addr;
-						write_address_var <= rle_addr;
-						newData <= data_in;
-						STATE <= PRECALC;
-						end
-			PRECALC: begin
-				 if(newData != data_in)
-					begin
-					newData <= data_in;
-					$display ("This is newData: %h", newData);
+				if(start)
+				begin
+					write <= 1'b0;
+					read_address_var <= message_addr;
+					write_address_var <= rle_addr;
+					shift_count <= 0;
+					byte_written <= 32'b0;
+					rle_counter <= 32'b0;
+					byte <= 8'b0;
+					similar_byte_count <= 8'b0;
+					write_buff <= 32'b0;
+					lsb_half <= 1'b1;
+					read <= 1'b0;
+					doneFlag <= 1'b0;
 					STATE <= PRECALC;
+				end
+			// Stage to update the read address after  writing
+			PRECALC: 	begin
+				 	read_address_var <= read_count;
+					read <= 1'b1;
+					STATE <= CALCULATE;
 					end
-				 else 
-				 begin
-				 	STATE <= CALCULATE;
-				 end
-				 end
 
-			CALCULATE:	begin
-						
-						if(!port_A_we)
+			CALCULATE:	
+					if(read)
+					begin
+						read <= 0;
+						newData <= port_A_data_out;
+					end
+					else
+					begin
+						// After we shift four times, we want to read next line
+						if(shift_count == 4)
 						begin
-						
-						$display ("INSIDE CALCULATE NOW");
-						$display ("data_in: %h", data_in);
-						//data_in <= port_A_data_out;
-							if(shift_count == 4)
-							begin	
-							$display ("Entered IF");
-							//read_address_var <= rd_addr;
-							port_A_addr <= read_address_var + 4;
 							shift_count <= 0;
-							port_A_we <= 1'b1;
-							end
-
-							else if(byte_count == 0)
+							STATE <= PRECALC;
+						end
+						else
+						begin						
+							read <= 1'b0;
+							STATE <= CALCULATE;
+						end
+				
+						// If we aren't writing, shift read bits
+						if(!write && shift_count != 4)
+						begin
+							if(similar_byte_count == 0)
 							begin
-							byte <= newData[7:0]; 		//Saves the initial data
-							$display ("Entered ELSE IF ONE");
-							//data_in <= data_in >> 8;
-							$display ("newData: %h", newData);
-							$display ("byte: %h", byte);
-							newData <= newData >> 8;
-							shift_count <= shift_count + 1;
-							byte_count <= byte_count + 1;
+								byte <= newData[7:0]; 
+								$display ("Entered ELSE IF ONE");
+								$display ("newData: %h", newData);
+								$display ("byte: %h", byte);
+								newData <= newData >> 8;
+								rle_counter <= rle_counter + 1;
+								shift_count <= shift_count + 1;
+								similar_byte_count <= similar_byte_count + 1;
 							end
-
 
 							else if(byte == newData[7:0])
 							begin
-							$display ("Entered ELSE IF TWO");
-							//data_in <= data_in >> 8;
-							newData <= newData >> 8;
-							shift_count <= shift_count + 1;
-							byte_count <= byte_count + 1;
+								$display ("Entered ELSE IF TWO");
+								$display ("newData: %h", newData);
+								$display ("byte: %h", byte);
+								newData <= newData >> 8;
+								rle_counter <= rle_counter + 1;
+								shift_count <= shift_count + 1;
+								similar_byte_count <= similar_byte_count + 1;
 							end
 
 							else
 							begin
-							$display ("Entered ELSE");
-							port_A_we <= 1'b1;
-							//byte <= newData[7:0];
-							$display ("newData: %h", newData);
-							$display ("byte: %h", byte);
-							end
-$display ("\n");
+								$display ("Entered ELSE");
+								write <= 1'b1;
+								read <= 1'b0;
+								$display ("newData: %h", newData);
+								$display ("byte: %h", byte);
+							end	
+						end // end of if(!write) statment
 							
-						end
-						
-						
-
-						else
+						else if(write)
 						begin
 							if(lsb_half)
 							begin
-							port_A_addr <= write_address_var;
-							port_A_data_in [7:0] <= byte_count;
-							port_A_data_in [15:8] <= byte;
-							port_A_we <= 1'b0;
-							lsb_half <= 1'b0;
+								write_buff [7:0] <= similar_byte_count;
+								write_buff [15:8] <= byte;
+								write <= 1'b0;
+								byte_written <= byte_written + 2;
+								lsb_half <= 1'b0;
 							end
 
 							else
 							begin
-							port_A_addr <= write_address_var;
-							port_A_data_in [23:16] <= byte_count;
-							port_A_data_in [31:24] <= byte;
-							port_A_we <= 1'b0;
-							lsb_half <= 1'b1;
-							write_address_var <= write_address_var + 4;
+								write_buff [23:16] <= similar_byte_count;
+								write_buff [31:24] <= byte;
+								byte_written <= byte_written + 2;
+								write <= 1'b0;
+								lsb_half <= 1'b1;
 							end
-
-							byte_count <= 0;
-							//port_A_addr <= read_address_var;
+							similar_byte_count <= 8'b0;
+							write_address_var <= write_count;
+							if(rle_counter == message_size)
+							begin
+								doneFlag <= 1'b1;
+								write <= 1'b0;	
+								STATE <= IDLE;
+							end
+							$display("In writing stage");
 						end
-						STATE <= CALCULATE;
-					end
-							
-			/*TEMP:	begin
-				port_A_addr <= read_address_var;
-				STATE <= CALCULATE;
-				end*/
-			FINISH: STATE <= IDLE;
-		
+					end // End of else after if(!write)
 		endcase
 	
 end
