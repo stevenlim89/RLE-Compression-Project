@@ -53,7 +53,7 @@ output	[31:0] rle_size;
 output	done; // done is a signal to indicate that encryption of the frame is complete
 
 // State Machine  
-parameter IDLE = 3'b000, CALCULATE = 3'b001, PRECALC = 3'b010;
+parameter IDLE = 3'b000, CALCULATE = 3'b001, PRECALC = 3'b010, FINISH = 3'b011;
 
 reg [7:0] byte;			// Tracks the bytes reading in
 reg [7:0] similar_byte_count;  	// Counts the number of same bytes read in
@@ -63,6 +63,7 @@ reg [31:0] read_address_var;	// Register to store read address
 reg [31:0] write_buff, newData; // Registers to store what needs to be written and read in
 reg [31:0] rle_counter;
 reg [31:0] byte_written;
+reg [31:0] byte_tracker;
 reg lsb_half;			// Write to the first half of the write buffer
 reg write, read;		// Flags to keep track if we should read or write now
 reg doneFlag;
@@ -102,6 +103,7 @@ begin
 		lsb_half <= 1'b1;
 		read <= 1'b0;
 		doneFlag <= 1'b0;
+		byte_tracker <= 32'b0;
 	end
 	
 	else
@@ -121,6 +123,7 @@ begin
 					lsb_half <= 1'b1;
 					read <= 1'b0;
 					doneFlag <= 1'b0;
+					byte_tracker <= 32'b0;
 					STATE <= PRECALC;
 				end
 			// Stage to update the read address after  writing
@@ -134,9 +137,11 @@ begin
 					if(read)
 					begin
 						read <= 0;
+						write <= 1'b0;
 						newData <= port_A_data_out;
+						STATE <= CALCULATE;
 					end
-					else
+					else 
 					begin
 						// After we shift four times, we want to read next line
 						if(shift_count == 4)
@@ -185,37 +190,60 @@ begin
 								$display ("byte: %h", byte);
 							end	
 						end // end of if(!write) statment
-							
+						
 						else if(write)
 						begin
-							if(lsb_half)
+							if(byte_tracker == 2)
 							begin
-								write_buff [7:0] <= similar_byte_count;
-								write_buff [15:8] <= byte;
 								write <= 1'b0;
-								byte_written <= byte_written + 2;
-								lsb_half <= 1'b0;
-							end
-
-							else
-							begin
-								write_buff [23:16] <= similar_byte_count;
-								write_buff [31:24] <= byte;
-								byte_written <= byte_written + 2;
-								write <= 1'b0;
+								byte_tracker <= 0;
 								lsb_half <= 1'b1;
+								write_address_var <= write_count;
 							end
-							similar_byte_count <= 8'b0;
-							write_address_var <= write_count;
-							if(rle_counter == message_size)
-							begin
-								doneFlag <= 1'b1;
-								write <= 1'b0;	
-								STATE <= IDLE;
+							else begin
+								if(lsb_half)
+								begin
+									write_buff [7:0] <= similar_byte_count;
+									write_buff [15:8] <= byte;
+									write <= 1'b0;
+									byte_written <= byte_written + 2;
+									byte_tracker <= byte_tracker + 1;
+									lsb_half <= 1'b0;
+								end
+
+								else
+								begin
+									write_buff [23:16] <= similar_byte_count;
+									write_buff [31:24] <= byte;
+									byte_written <= byte_written + 2;
+									byte_tracker <= byte_tracker + 1;
+									write <= 1'b0;
+									lsb_half <= 1'b1;
+								end
+								if(rle_counter == message_size)
+								begin
+									STATE <= FINISH;
+									write <= 1'b0;	
+									write_buff [23:16] <= similar_byte_count;
+									write_buff [31:24] <= byte;
+									$display("In writing stage");
+					$display("%h", write_buff);
+					$display("%h", byte);
+					$display("%h", similar_byte_count);
+								end
+								else
+								begin
+									similar_byte_count <= 8'b0;
+								end
 							end
-							$display("In writing stage");
 						end
 					end // End of else after if(!write)
+			FINISH: begin			
+					write_address_var <= write_count;	
+					doneFlag <= 1'b1;
+					STATE <= IDLE;
+					
+				end
 		endcase
 	
 end
