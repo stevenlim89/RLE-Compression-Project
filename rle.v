@@ -73,8 +73,10 @@ integer shift_count;		// Counter to keep track of how many bits have been shifte
 wire [31:0] read_count;		// Wire that holds the updated values of the new read address 
 wire [31:0] write_count;	// Wire that holds the updated values of the new write address
 
+
 assign read_count = read_address_var + 4;
 assign write_count = write_address_var + 4;
+
 
 // Need to assign module outputs. They should be wires.
 assign port_A_clk = clk;	//Clarified in the Piazza post
@@ -84,7 +86,7 @@ assign port_A_data_in = write_buff;
 
 // Do later
 assign rle_size = byte_written;
-assign done = doneFlag;
+assign done = (doneFlag && STATE == IDLE);// && write);
 
 always @ (posedge clk or negedge nreset)
 begin
@@ -155,6 +157,7 @@ begin
 							STATE <= CALCULATE;
 						end
 				
+						$display ("Checking write and shift_count: %h, %h", write, shift_count);
 						// If we aren't writing, shift read bits
 						if(!write && shift_count != 4)
 						begin
@@ -223,13 +226,24 @@ begin
 								if(rle_counter == message_size)
 								begin
 									STATE <= FINISH;
-									write <= 1'b0;	
-									write_buff [23:16] <= similar_byte_count;
-									write_buff [31:24] <= byte;
+									write <= 1'b1;	
+									if(lsb_half)
+									begin
+										write_buff [7:0] <= similar_byte_count;
+										write_buff [15:8] <= byte;
+										write_buff [31:16] <= 16'd0;
+									end
+
+									else
+									begin
+										write_buff [23:16] <= similar_byte_count;
+										write_buff [31:24] <= byte;
+									end
+
 									$display("In writing stage");
-					$display("%h", write_buff);
-					$display("%h", byte);
-					$display("%h", similar_byte_count);
+									$display("%h", write_buff);
+									$display("%h", byte);
+									$display("%h", similar_byte_count);
 								end
 								else
 								begin
@@ -241,6 +255,7 @@ begin
 			FINISH: begin			
 					write_address_var <= write_count;	
 					doneFlag <= 1'b1;
+					write <= 1'b0;
 					STATE <= IDLE;
 					
 				end
