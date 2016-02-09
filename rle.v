@@ -52,31 +52,50 @@ output	[31:0] rle_size;
 
 output	done; // done is a signal to indicate that encryption of the frame is complete
 
-// State Machine  
-parameter IDLE = 3'b000, CALCULATE = 3'b001, PRECALC = 3'b010, FINISH = 3'b011;
 
-reg [7:0] byte;			// Tracks the bytes reading in
+
+// State Machine  
+parameter IDLE = 2'b00, CALCULATE = 2'b01, PRECALC = 2'b10, FINISH = 2'b11;
+
+reg [7:0] byte_read;		// Tracks the bytes reading in
 reg [7:0] similar_byte_count;  	// Counts the number of same bytes read in
-reg [2:0] STATE;		// Tracks the state we are in
+reg [1:0] STATE;		// Tracks the state we are in
 reg [31:0] write_address_var;  	// Register to store write adress
 reg [31:0] read_address_var;	// Register to store read address
 reg [31:0] write_buff, newData; // Registers to store what needs to be written and read in
-reg [31:0] rle_counter;
-reg [31:0] byte_written;
-reg [31:0] byte_tracker;
+reg [7:0] rle_counter;
+reg [7:0] byte_written;
+reg [1:0] byte_tracker;
 reg lsb_half;			// Write to the first half of the write buffer
 reg write, read;		// Flags to keep track if we should read or write now
 reg doneFlag;
 
-integer shift_count;		// Counter to keep track of how many bits have been shifted
+reg [2:0] shift_count;		// Counter to keep track of how many bits have been shifted
 
 wire [31:0] read_count;		// Wire that holds the updated values of the new read address 
 wire [31:0] write_count;	// Wire that holds the updated values of the new write address
-
+wire [7:0] update_rle_counter;
+wire [2:0] update_shift_count;
+wire [7:0] update_similar_byte_count;
+wire [7:0] update_byte_written;
+wire [1:0] update_byte_tracker;
+wire shift_count_compare;
+wire similar_byte_compare;
+wire byte_tracker_compare;
+wire reach_msg_size;
 
 assign read_count = read_address_var + 4;
 assign write_count = write_address_var + 4;
+assign update_rle_counter = rle_counter + 1;
+assign update_shift_count = shift_count + 1;
+assign update_similar_byte_count = similar_byte_count + 1;
+assign update_byte_written = byte_written + 2;
+assign update_byte_tracker = byte_tracker + 1;
 
+assign shift_count_compare = (shift_count == 4);
+assign similar_byte_compare = (similar_byte_count == 0);
+assign byte_tracker_compare = (byte_tracker == 2);
+assign reach_msg_size = (rle_counter == message_size);
 
 // Need to assign module outputs. They should be wires.
 assign port_A_clk = clk;	//Clarified in the Piazza post
@@ -84,28 +103,28 @@ assign port_A_addr = (write) ? write_address_var : read_address_var;
 assign port_A_we = write;
 assign port_A_data_in = write_buff;
 
-// Do later
+
 assign rle_size = byte_written;
-assign done = (doneFlag && STATE == IDLE);// && write);
+assign done = (doneFlag && STATE == IDLE);
 
 always @ (posedge clk or negedge nreset)
 begin
 	if(!nreset)
 	begin
 		STATE <= IDLE;
-		byte <= 8'b0;
-		shift_count <= 0;
+		byte_read <= 8'b0;
+		shift_count <= 3'b0;
 		similar_byte_count <= 8'b0;
 		write <= 1'b0;
 		write_address_var <= 32'b0;
 		read_address_var <= 32'b0;
-		byte_written <= 32'b0;
-		rle_counter <= 32'b0;
+		byte_written <= 8'b0;
+		rle_counter <= 8'b0;
 		write_buff <= 32'b0;
 		lsb_half <= 1'b1;
 		read <= 1'b0;
 		doneFlag <= 1'b0;
-		byte_tracker <= 32'b0;
+		byte_tracker <= 2'b0;
 	end
 	
 	else
@@ -116,18 +135,19 @@ begin
 					write <= 1'b0;
 					read_address_var <= message_addr;
 					write_address_var <= rle_addr;
-					shift_count <= 0;
-					byte_written <= 32'b0;
-					rle_counter <= 32'b0;
-					byte <= 8'b0;
+					shift_count <= 3'b0;
+					byte_written <= 8'b0;
+					rle_counter <= 8'b0;
+					byte_read <= 8'b0;
 					similar_byte_count <= 8'b0;
 					write_buff <= 32'b0;
 					lsb_half <= 1'b1;
 					read <= 1'b0;
 					doneFlag <= 1'b0;
-					byte_tracker <= 32'b0;
+					byte_tracker <= 2'b0;
 					STATE <= PRECALC;
 				end
+
 			// Stage to update the read address after  writing
 			PRECALC: 	begin
 				 	read_address_var <= read_count;
@@ -146,7 +166,7 @@ begin
 					else 
 					begin
 						// After we shift four times, we want to read next line
-						if(shift_count == 4)
+						if(shift_count_compare)
 						begin
 							shift_count <= 0;
 							STATE <= PRECALC;
@@ -157,46 +177,29 @@ begin
 							STATE <= CALCULATE;
 						end
 				
-						$display ("Checking write and shift_count: %h, %h", write, shift_count);
 						// If we aren't writing, shift read bits
 						if(!write && shift_count != 4)
 						begin
-							if(similar_byte_count == 0)
+							if(similar_byte_compare || byte_read == newData[7:0])
 							begin
-								byte <= newData[7:0]; 
-								$display ("Entered ELSE IF ONE");
-								$display ("newData: %h", newData);
-								$display ("byte: %h", byte);
+								byte_read <= newData[7:0]; 
 								newData <= newData >> 8;
-								rle_counter <= rle_counter + 1;
-								shift_count <= shift_count + 1;
-								similar_byte_count <= similar_byte_count + 1;
-							end
-
-							else if(byte == newData[7:0])
-							begin
-								$display ("Entered ELSE IF TWO");
-								$display ("newData: %h", newData);
-								$display ("byte: %h", byte);
-								newData <= newData >> 8;
-								rle_counter <= rle_counter + 1;
-								shift_count <= shift_count + 1;
-								similar_byte_count <= similar_byte_count + 1;
+								rle_counter <= update_rle_counter;
+								shift_count <= update_shift_count;
+								similar_byte_count <= update_similar_byte_count;
 							end
 
 							else
 							begin
-								$display ("Entered ELSE");
 								write <= 1'b1;
 								read <= 1'b0;
-								$display ("newData: %h", newData);
-								$display ("byte: %h", byte);
+
 							end	
 						end // end of if(!write) statment
 						
 						else if(write)
 						begin
-							if(byte_tracker == 2)
+							if(byte_tracker_compare)
 							begin
 								write <= 1'b0;
 								byte_tracker <= 0;
@@ -207,49 +210,52 @@ begin
 								if(lsb_half)
 								begin
 									write_buff [7:0] <= similar_byte_count;
-									write_buff [15:8] <= byte;
-									write <= 1'b0;
-									byte_written <= byte_written + 2;
-									byte_tracker <= byte_tracker + 1;
+									write_buff [15:8] <= byte_read;
+									//write <= 1'b0;
+									//byte_written <= update_byte_written;
+									//byte_tracker <= update_byte_tracker;
 									lsb_half <= 1'b0;
 								end
 
 								else
 								begin
 									write_buff [23:16] <= similar_byte_count;
-									write_buff [31:24] <= byte;
-									byte_written <= byte_written + 2;
-									byte_tracker <= byte_tracker + 1;
-									write <= 1'b0;
+									write_buff [31:24] <= byte_read;
+									//byte_written <= update_byte_written;
+									//byte_tracker <= update_byte_tracker;
+									//write <= 1'b0;
 									lsb_half <= 1'b1;
 								end
-								if(rle_counter == message_size)
+
+								byte_written <= update_byte_written;
+								byte_tracker <= update_byte_tracker;
+								write <= 1'b0;
+
+								if(reach_msg_size)
 								begin
 									STATE <= FINISH;
 									write <= 1'b1;	
 									if(lsb_half)
 									begin
+										$display ("Hi");
 										write_buff [7:0] <= similar_byte_count;
-										write_buff [15:8] <= byte;
+										write_buff [15:8] <= byte_read;
 										write_buff [31:16] <= 16'd0;
 									end
 
 									else
 									begin
+										$display ("wWrld");
 										write_buff [23:16] <= similar_byte_count;
-										write_buff [31:24] <= byte;
+										write_buff [31:24] <= byte_read;
 									end
-
-									$display("In writing stage");
-									$display("%h", write_buff);
-									$display("%h", byte);
-									$display("%h", similar_byte_count);
 								end
 								else
 								begin
 									similar_byte_count <= 8'b0;
 								end
 							end
+
 						end
 					end // End of else after if(!write)
 			FINISH: begin			
