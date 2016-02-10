@@ -155,28 +155,43 @@ begin
 					STATE <= CALCULATE;
 					end
 
-			CALCULATE:	
+			CALCULATE:	begin
 					if(read)
 					begin
-						read <= 0;
+						read <= 1'b0;
 						write <= 1'b0;
 						newData <= port_A_data_out;
 						STATE <= CALCULATE;
 					end
 					else 
 					begin
+						read <= 1'b0;
+						STATE <= CALCULATE;
+
 						// After we shift four times, we want to read next line
 						if(shift_count_compare)
 						begin
 							shift_count <= 0;
 							STATE <= PRECALC;
 						end
-						else
-						begin						
-							read <= 1'b0;
-							STATE <= CALCULATE;
-						end
 				
+						/*// If we aren't writing, shift read bits
+						if((!write && shift_count != 4) && (similar_byte_compare || byte_read == newData[7:0]))
+						begin
+							byte_read <= newData[7:0]; 
+							newData <= newData >> 8;
+							rle_counter <= update_rle_counter;
+							shift_count <= update_shift_count;
+							similar_byte_count <= update_similar_byte_count;
+						end // end of if(!write) statment
+
+						else
+						begin
+	
+							write <= 1'b1;
+							read <= 1'b0;
+						end*/
+
 						// If we aren't writing, shift read bits
 						if(!write && shift_count != 4)
 						begin
@@ -196,7 +211,7 @@ begin
 
 							end	
 						end // end of if(!write) statment
-						
+						//if byte_read !=  newData [7:0] || reach_msg_size
 						else if(write)
 						begin
 							if(byte_tracker_compare)
@@ -206,58 +221,35 @@ begin
 								lsb_half <= 1'b1;
 								write_address_var <= write_count;
 							end
-							else begin
-								if(lsb_half)
+							else
+							begin
+								byte_written <= update_byte_written;
+								byte_tracker <= update_byte_tracker;
+								similar_byte_count <= 8'b0;
+								write <= 1'b0;
+
+								if(lsb_half || (lsb_half && reach_msg_size))
 								begin
-									write_buff [7:0] <= similar_byte_count;
-									write_buff [15:8] <= byte_read;
-									//write <= 1'b0;
-									//byte_written <= update_byte_written;
-									//byte_tracker <= update_byte_tracker;
+									write_buff [31:0] <= {16'b0, byte_read, similar_byte_count};
 									lsb_half <= 1'b0;
+									
 								end
 
 								else
 								begin
-									write_buff [23:16] <= similar_byte_count;
-									write_buff [31:24] <= byte_read;
-									//byte_written <= update_byte_written;
-									//byte_tracker <= update_byte_tracker;
-									//write <= 1'b0;
+									write_buff [31:16] <= {byte_read, similar_byte_count};
 									lsb_half <= 1'b1;
 								end
-
-								byte_written <= update_byte_written;
-								byte_tracker <= update_byte_tracker;
-								write <= 1'b0;
-
 								if(reach_msg_size)
 								begin
 									STATE <= FINISH;
-									write <= 1'b1;	
-									if(lsb_half)
-									begin
-										$display ("Hi");
-										write_buff [7:0] <= similar_byte_count;
-										write_buff [15:8] <= byte_read;
-										write_buff [31:16] <= 16'd0;
-									end
-
-									else
-									begin
-										$display ("wWrld");
-										write_buff [23:16] <= similar_byte_count;
-										write_buff [31:24] <= byte_read;
-									end
-								end
-								else
-								begin
-									similar_byte_count <= 8'b0;
+									write <= 1'b1;
 								end
 							end
-
+							
 						end
-					end // End of else after if(!write)
+					end // End of else statement
+					end
 			FINISH: begin			
 					write_address_var <= write_count;	
 					doneFlag <= 1'b1;
